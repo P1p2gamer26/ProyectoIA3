@@ -1,0 +1,9 @@
+# Red Bayesiana - Estructura del grafo
+# Formato: nodo_padre,nodo_hijo
+# Cada linea define un arco dirigido (dependencia causal) entre dos nodos.
+# Las lineas en blanco y las que empiezan con '#' se ignoran.
+
+Rain,Maintenance
+Rain,Train
+Maintenance,Train
+Train,Appointment

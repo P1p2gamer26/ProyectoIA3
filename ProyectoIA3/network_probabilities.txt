@@ -1,0 +1,52 @@
+# Red Bayesiana - Tablas de Probabilidad Condicional (CPT)
+#
+# Formato de cada bloque:
+#   NODE <nombre>
+#   VALUES <val1> <val2> ...
+#   [PARENTS <padre1> <padre2> ...]   <- omitir si el nodo no tiene padres
+#   <val_padre1> [val_padre2] <prob1> <prob2> ...
+#
+# Para un nodo SIN padres: una sola fila con todas las probabilidades.
+# Para un nodo CON padres: una fila por cada combinacion de valores de los padres.
+# Las probabilidades de cada fila deben sumar 1.0.
+# Las lineas en blanco y las que empiezan con '#' se ignoran.
+# ------------------------------------------------------------------
+
+# ---- Nodo raiz: Rain ----
+# Probabilidades a priori del estado del clima.
+NODE Rain
+VALUES none light heavy
+# P(none) P(light) P(heavy)
+0.7 0.2 0.1
+
+# ---- Nodo: Maintenance ----
+# Probabilidad de mantenimiento en las vias dado el estado del clima.
+NODE Maintenance
+VALUES yes no
+PARENTS Rain
+# Rain    P(yes) P(no)
+none  0.4 0.6
+light 0.2 0.8
+heavy 0.1 0.9
+
+# ---- Nodo: Train ----
+# Estado del tren dado el clima y el mantenimiento.
+NODE Train
+VALUES on_time delayed
+PARENTS Rain Maintenance
+# Rain   Maint   P(on_time) P(delayed)
+none  yes  0.8 0.2
+none  no   0.9 0.1
+light yes  0.6 0.4
+light no   0.7 0.3
+heavy yes  0.4 0.6
+heavy no   0.5 0.5
+
+# ---- Nodo hoja: Appointment ----
+# Probabilidad de asistir a la reunion dado el estado del tren.
+NODE Appointment
+VALUES attend miss
+PARENTS Train
+# Train     P(attend) P(miss)
+on_time 0.9 0.1
+delayed 0.6 0.4
