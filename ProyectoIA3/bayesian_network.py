@@ -1,12 +1,18 @@
 """
 Proyecto 3 - Motor de Inferencia por Enumeracion
-Parte 1: Red Bayesiana - Estructura y Tablas de Probabilidad
+Modulo principal: Red Bayesiana y Motor de Inferencia
 
 Clases implementadas:
   CPT             - Tabla de Probabilidad Condicional
   Node            - Nodo (variable aleatoria) del grafo
   Arc             - Arco dirigido entre dos nodos
-  BayesianNetwork - Grafo Dirigido Aciclico (DAG)
+  BayesianNetwork - Grafo Dirigido Aciclico (DAG) + Motor de Inferencia
+
+Motor de Inferencia:
+  Implementa el algoritmo ENUMERATION-ASK descrito en:
+  Russell & Norvig, "Artificial Intelligence: A Modern Approach", Cap. 13.
+  Calcula P(X | e) sumando sobre todas las combinaciones posibles de
+  las variables ocultas (aquellas que no son ni consulta ni evidencia).
 """
 
 
@@ -21,9 +27,13 @@ class CPT:
     Almacena P(nodo=v | padres=combinacion) para cada combinacion de
     valores de los padres y cada valor v del nodo.
 
-    La clave interna es una tupla con los valores de los padres (en el
-    mismo orden en que se declararon en PARENTS); el valor asociado es
-    un diccionario {valor_nodo: probabilidad}.
+    Estructura interna:
+        entries: dict donde la clave es una tupla con los valores de los
+                 padres (en el orden declarado en PARENTS) y el valor es
+                 un diccionario {valor_nodo: probabilidad}.
+
+    Ejemplo para el nodo Train con padres [Rain, Maintenance]:
+        entries[('light', 'no')] = {'on_time': 0.7, 'delayed': 0.3}
     """
 
     def __init__(self, node_values):
@@ -44,7 +54,7 @@ class CPT:
             parent_vals_tuple (tuple): valores de los padres para esta
                 fila; tupla vacia si el nodo no tiene padres.
             probabilities (list[float]): probabilidades en el mismo
-                orden que self.node_values.
+                orden que self.node_values. Deben sumar 1.0.
         """
         if len(probabilities) != len(self.node_values):
             raise ValueError(
@@ -60,8 +70,8 @@ class CPT:
 
         Parametros:
             node_value (str)        : valor del nodo consultado.
-            parent_vals_tuple (tuple): valores actuales de los padres.
-
+            parent_vals_tuple (tuple): valores actuales de los padres,
+                                       en el mismo orden que en la CPT.
         Retorna:
             float: probabilidad buscada.
         """
@@ -107,6 +117,9 @@ class Arc:
     """
     Arco dirigido (padre -> hijo) que representa dependencia causal
     entre dos variables de la Red Bayesiana.
+
+    Un arco Rain -> Train significa que la lluvia influye directamente
+    en el estado del tren, es decir, P(Train) esta condicionada a Rain.
     """
 
     def __init__(self, source, destination):
@@ -129,6 +142,11 @@ class Arc:
 class Node:
     """
     Variable aleatoria dentro de la Red Bayesiana.
+
+    Cada nodo encapsula:
+      - Su dominio (valores posibles).
+      - Sus relaciones de dependencia (padres = causas, hijos = efectos).
+      - Su tabla de probabilidad condicional P(nodo | padres).
 
     Atributos:
         name     (str)       : identificador unico del nodo.
@@ -171,16 +189,20 @@ class Node:
         """
         Retorna P(nodo=value | asignacion de padres).
 
+        Construye la clave de busqueda en la CPT respetando el orden
+        en que los padres fueron declarados (self.parents), lo que
+        garantiza consistencia con el archivo de probabilidades.
+
         Parametros:
-            value             (str) : valor del nodo.
+            value             (str) : valor del nodo a consultar.
             parent_assignment (dict): {nombre_padre: valor_padre}.
                                       Vacio o None si no hay padres.
         Retorna:
-            float: probabilidad.
+            float: probabilidad P(value | padres).
         """
         if parent_assignment is None:
             parent_assignment = {}
-        # Construye la clave respetando el orden de self.parents
+        # La clave respeta el orden de declaracion de padres en la CPT
         parent_tuple = tuple(parent_assignment.get(p.name, "") for p in self.parents)
         return self.cpt.get_probability(value, parent_tuple)
 
@@ -194,7 +216,7 @@ class Node:
 
 
 # =============================================================================
-# Clase BayesianNetwork - Grafo Dirigido Aciclico
+# Clase BayesianNetwork - Grafo Dirigido Aciclico + Motor de Inferencia
 # =============================================================================
 
 class BayesianNetwork:
@@ -203,9 +225,16 @@ class BayesianNetwork:
     de dependencia probabilistica entre variables aleatorias.
 
     Responsabilidades:
-      - Cargar la estructura del grafo desde un archivo de texto.
-      - Cargar las CPTs de cada nodo desde un archivo de texto.
-      - Mostrar la estructura y las tablas en formato legible.
+      1. Cargar la estructura del grafo desde archivo (load_structure).
+      2. Cargar las CPTs de cada nodo desde archivo (load_probabilities).
+      3. Mostrar estructura y tablas en formato legible (display_*).
+      4. Realizar inferencia por enumeracion (enumerate_ask).
+
+    La inferencia implementa el algoritmo ENUMERATION-ASK:
+      - Dada una variable consulta X y evidencia e = {E1=e1, E2=e2, ...},
+        calcula la distribucion de probabilidad P(X | e).
+      - Internamente suma sobre todos los valores posibles de cada
+        variable oculta Y (aquellas que no son X ni estan en e).
     """
 
     def __init__(self):
@@ -248,7 +277,7 @@ class BayesianNetwork:
 
                 parent_name, child_name = parts
 
-                # Crea los nodos si aun no existen
+                # Crea los nodos si aun no existen en el diccionario
                 if parent_name not in self.nodes:
                     self.nodes[parent_name] = Node(parent_name)
                 if child_name not in self.nodes:
@@ -257,11 +286,11 @@ class BayesianNetwork:
                 parent_node = self.nodes[parent_name]
                 child_node = self.nodes[child_name]
 
-                # Establece la relacion padre <-> hijo
+                # Establece la relacion bidireccional padre <-> hijo
                 child_node.add_parent(parent_node)
                 parent_node.add_child(child_node)
 
-                # Registra el arco
+                # Registra el arco en la lista global
                 self.arcs.append(Arc(parent_node, child_node))
 
         print(f"[INFO] Estructura cargada desde '{filepath}'")
@@ -325,7 +354,7 @@ class BayesianNetwork:
             node = self.nodes[node_name]
             i += 1
 
-            # Lee la linea VALUES
+            # Lee la linea VALUES que define el dominio del nodo
             if i >= len(lines) or not lines[i].upper().startswith('VALUES'):
                 raise ValueError(
                     f"Se esperaba 'VALUES' despues de 'NODE {node_name}'."
@@ -333,7 +362,7 @@ class BayesianNetwork:
             node.values = lines[i].split()[1:]
             i += 1
 
-            # Lee la linea PARENTS (opcional)
+            # Lee la linea PARENTS (opcional, solo si el nodo tiene padres)
             declared_parents = []
             if i < len(lines) and lines[i].upper().startswith('PARENTS'):
                 declared_parents = lines[i].split()[1:]
@@ -354,6 +383,7 @@ class BayesianNetwork:
                         f"({num_parent_cols} de padres + {len(node.values)} probabilidades)."
                     )
 
+                # Separa los valores de los padres de las probabilidades
                 parent_vals = tuple(row_tokens[:num_parent_cols])
                 probs = [float(t) for t in row_tokens[num_parent_cols:]]
                 cpt.add_entry(parent_vals, probs)
@@ -455,7 +485,223 @@ class BayesianNetwork:
         print("=" * 60)
 
     # =========================================================================
-    # Utilidades
+    # Motor de Inferencia por Enumeracion
+    # =========================================================================
+
+    def enumerate_ask(self, query_var_name, evidence, trace=False):
+        """
+        Calcula P(X | e) usando el algoritmo de Inferencia por Enumeracion.
+
+        Fundamento matematico:
+            P(X | e) = alpha * P(X, e)
+                     = alpha * SUM_y  P(X, e, y)    (suma sobre variables ocultas Y)
+
+        donde alpha = 1 / SUM_xi P(xi, e) es el factor de normalizacion
+        que garantiza que las probabilidades sumen 1.
+
+        El algoritmo recorre las variables en orden topologico (padres
+        antes que hijos), lo que asegura que cuando se evalua P(Y | padres(Y))
+        los valores de los padres ya esten disponibles en la evidencia.
+
+        Parametros:
+            query_var_name (str) : nombre de la variable X cuya distribucion
+                                   se desea calcular.
+            evidence       (dict): asignaciones observadas {nombre: valor},
+                                   ej. {'Rain': 'light', 'Maintenance': 'no'}.
+            trace          (bool): si True, imprime cada paso del calculo.
+
+        Retorna:
+            dict: {valor: probabilidad} con la distribucion normalizada de X.
+                  Ejemplo: {'attend': 0.81, 'miss': 0.19}
+        """
+        if query_var_name not in self.nodes:
+            raise KeyError(f"Variable consulta '{query_var_name}' no encontrada en la red.")
+
+        query_node = self.nodes[query_var_name]
+
+        # El orden topologico garantiza que los padres preceden a sus hijos,
+        # condicion necesaria para que la recursion encuentre siempre los
+        # valores de los padres en la evidencia antes de necesitarlos.
+        variables = self.topological_sort()
+
+        # Identificamos las variables ocultas para mostrarlas en la traza
+        hidden = [v for v in variables
+                  if v.name != query_var_name and v.name not in evidence]
+
+        if trace:
+            self._print_query_header(query_var_name, query_node, evidence, hidden, variables)
+
+        # Distribucion sin normalizar: Q[xi] = P(X=xi, e)
+        Q = {}
+        for xi in query_node.values:
+            # Extendemos la evidencia con la hipotesis X=xi
+            extended_evidence = dict(evidence)
+            extended_evidence[query_var_name] = xi
+
+            if trace:
+                print(f"\n{'='*60}")
+                print(f"  Calculando termino para {query_var_name} = '{xi}'")
+                print(f"{'='*60}")
+
+            Q[xi] = self._enumerate_all(variables, extended_evidence, trace, depth=0)
+
+            if trace:
+                print(f"\n  >> Resultado bruto P({query_var_name}={xi}, e) = {Q[xi]:.6f}")
+
+        # Normalizacion: alpha = 1 / sum(Q)
+        total = sum(Q.values())
+        # alpha es el factor de normalizacion que convierte probabilidades
+        # conjuntas en probabilidades condicionales
+        alpha = 1.0 / total if total > 0 else 0.0
+        normalized = {v: p * alpha for v, p in Q.items()}
+
+        if trace:
+            self._print_normalization(Q, total, alpha, normalized, query_var_name)
+
+        return normalized
+
+    def _enumerate_all(self, variables, evidence, trace, depth):
+        """
+        Nucleo recursivo del algoritmo de enumeracion.
+
+        Para cada variable en orden topologico:
+          - Si tiene valor en la evidencia: multiplica P(y | padres) y avanza.
+          - Si es oculta: suma P(y | padres) * resultado_recursivo para
+            cada valor posible y, extendiendo la evidencia con Y=y.
+
+        Esta suma marginaliza las variables ocultas, dejando solo la
+        contribucion de la evidencia y la hipotesis sobre X.
+
+        Parametros:
+            variables (list[Node]): variables restantes por procesar.
+            evidence  (dict)      : asignaciones actuales (evidencia + hipotesis).
+            trace     (bool)      : si True, imprime el estado en cada paso.
+            depth     (int)       : nivel de sangria para la traza.
+
+        Retorna:
+            float: probabilidad acumulada del subproblema actual.
+        """
+        # Caso base: no quedan variables, la probabilidad del mundo es 1
+        if not variables:
+            return 1.0
+
+        Y = variables[0]          # variable actual a procesar
+        rest = variables[1:]      # variables restantes
+        indent = "    " * depth   # sangria proporcional a la profundidad
+
+        # Construye la asignacion de padres usando la evidencia actual.
+        # En orden topologico, los padres de Y ya fueron procesados antes,
+        # por lo que sus valores siempre estaran disponibles en evidence.
+        parent_assignment = {
+            p.name: evidence[p.name]
+            for p in Y.parents
+            if p.name in evidence
+        }
+
+        if Y.name in evidence:
+            # --- Caso 1: Y tiene valor observado (es evidencia o hipotesis) ---
+            y_val = evidence[Y.name]
+            p_y = Y.get_probability(y_val, parent_assignment)
+
+            if trace:
+                parents_str = (
+                    ", ".join(f"{k}={v}" for k, v in parent_assignment.items())
+                    if parent_assignment else "ninguno"
+                )
+                role = "(evidencia)" if Y.name != list(evidence.keys())[-1] else "(consulta)"
+                print(f"{indent}P({Y.name}={y_val} | {parents_str}) = {p_y:.4f}  {role}")
+
+            # Multiplica la probabilidad de este nodo por el resultado del resto
+            return p_y * self._enumerate_all(rest, evidence, trace, depth)
+
+        else:
+            # --- Caso 2: Y es variable oculta, hay que marginalizar ---
+            # Sumamos sobre todos los valores posibles de Y
+            if trace:
+                print(f"{indent}[oculta] {Y.name} in {Y.values} -> marginalizando:")
+
+            total = 0.0
+            for y_val in Y.values:
+                p_y = Y.get_probability(y_val, parent_assignment)
+
+                if trace:
+                    parents_str = (
+                        ", ".join(f"{k}={v}" for k, v in parent_assignment.items())
+                        if parent_assignment else "ninguno"
+                    )
+                    print(f"{indent}  P({Y.name}={y_val} | {parents_str}) = {p_y:.4f}")
+
+                # Extendemos la evidencia con Y=y_val para el subproblema
+                extended = dict(evidence)
+                extended[Y.name] = y_val
+
+                # Contribucion de esta rama: P(Y=y_val | padres) * P(resto | ...)
+                sub = p_y * self._enumerate_all(rest, extended, trace, depth + 1)
+
+                if trace:
+                    print(f"{indent}    subtotal con {Y.name}={y_val}: {sub:.6f}")
+
+                total += sub
+
+            if trace:
+                print(f"{indent}  suma marginal {Y.name} = {total:.6f}")
+
+            return total
+
+    # =========================================================================
+    # Metodos auxiliares para la traza visual
+    # =========================================================================
+
+    def _print_query_header(self, query_var_name, query_node, evidence,
+                            hidden, variables):
+        """Imprime el encabezado descriptivo de una consulta de inferencia."""
+        print("\n" + "=" * 60)
+        print("INFERENCIA POR ENUMERACION")
+        print("=" * 60)
+        print(f"  Consulta (X)       : {query_var_name}  {query_node.values}")
+        ev_str = ", ".join(f"{k}={v}" for k, v in evidence.items()) or "(ninguna)"
+        print(f"  Evidencia (e)      : {ev_str}")
+        hidden_names = [h.name for h in hidden] or ["(ninguna)"]
+        print(f"  Variables ocultas  : {hidden_names}")
+        topo_names = " -> ".join(v.name for v in variables)
+        print(f"  Orden topologico   : {topo_names}")
+        print(f"\n  Objetivo: calcular P({query_var_name} | {ev_str})")
+
+    def _print_normalization(self, Q, total, alpha, normalized, query_var_name):
+        """Imprime el paso de normalizacion con el factor alpha."""
+        print(f"\n{'='*60}")
+        print("  NORMALIZACION")
+        print(f"{'='*60}")
+        brutos = "  +  ".join(f"{p:.6f}" for p in Q.values())
+        print(f"  Suma bruta (1/alpha): {brutos} = {total:.6f}")
+        print(f"  Factor alpha        : 1 / {total:.6f} = {alpha:.4f}")
+        print(f"\n  RESULTADO FINAL:")
+        for val, prob in normalized.items():
+            bar = "#" * int(prob * 30)
+            print(f"    P({query_var_name}={val:<10}) = {prob:.4f}  |{bar}")
+        print("=" * 60)
+
+    # =========================================================================
+    # Metodo de visualizacion de consulta (sin traza detallada)
+    # =========================================================================
+
+    def display_query_result(self, query_var_name, evidence, result):
+        """
+        Muestra el resultado de una consulta de inferencia en formato compacto.
+
+        Parametros:
+            query_var_name (str) : nombre de la variable consultada.
+            evidence       (dict): evidencia usada en la consulta.
+            result         (dict): distribucion calculada por enumerate_ask.
+        """
+        ev_str = ", ".join(f"{k}={v}" for k, v in evidence.items()) or "(ninguna)"
+        print(f"\n  P({query_var_name} | {ev_str})")
+        for val, prob in result.items():
+            bar = "#" * int(prob * 30)
+            print(f"    {val:<12} = {prob:.4f}  |{bar}")
+
+    # =========================================================================
+    # Utilidades del grafo
     # =========================================================================
 
     def get_roots(self):
@@ -479,7 +725,13 @@ class BayesianNetwork:
     def topological_sort(self):
         """
         Retorna los nodos en orden topologico (padres antes que hijos).
-        Util para el motor de inferencia por enumeracion.
+
+        Propiedad clave para el motor de inferencia: garantiza que cuando
+        se evalua P(Y | padres(Y)) durante la enumeracion, los valores de
+        los padres de Y ya hayan sido procesados y esten disponibles en
+        la evidencia acumulada.
+
+        Implementacion: DFS postorden con marca de visitados.
 
         Retorna:
             list[Node]: nodos ordenados topologicamente.
@@ -491,6 +743,7 @@ class BayesianNetwork:
             if node.name in visited:
                 return
             visited.add(node.name)
+            # Procesar primero todos los padres (garantia topologica)
             for parent in node.parents:
                 dfs(parent)
             order.append(node)
